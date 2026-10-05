@@ -1,0 +1,33 @@
+{
+  "name": "dlr-backend",
+  "version": "1.0.0",
+  "description": "DLR backend service for document upload, AI orchestration, validation, and GIS coordination",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "dlr",
+    "land-records",
+    "express",
+    "api"
+  ],
+  "author": "Quantum Dragon's",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.2",
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  }
+}

@@ -1,0 +1,15 @@
+உரிமையாளர்: TEST_OWNER_NAME
+சர்வே எண்: 125/3A
+பரப்பு: 2.5 ஏக்கர்
+கிராமம்: TEST_VILLAGE
+தாலுகா: TEST_TALUK
+மாவட்டம்: TEST_DISTRICT
+தேதி: 12-04-2024
+
+Owner: TEST_OWNER_NAME
+Survey No: 125/3A
+Area: 2.5 Acres
+Village: TEST_VILLAGE
+Taluk: TEST_TALUK
+District: TEST_DISTRICT
+Date: 12-04-2024
