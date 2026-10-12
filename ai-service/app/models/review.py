@@ -29,7 +29,7 @@ class Anomaly(BaseModel):
     value: Any = None
     confidence: float | None = None
     source_page: int | None = None
-    source_bbox: list[int] | None = None
+    source_bbox: dict[str, Any] | list[Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=utc_now)
 

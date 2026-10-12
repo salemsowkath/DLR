@@ -30,6 +30,13 @@ class InMemoryDocumentRepository {
     });
   }
 
+  async updateLandRecordId(documentId, landRecordId) {
+    return DocumentMetadata.updateById(documentId, {
+      land_record_id: landRecordId,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
   async saveProcessingResult(documentId, result) {
     this.processingResults.set(documentId, { ...result, updated_at: new Date().toISOString() });
     return this.getProcessingResult(documentId);
@@ -62,10 +69,10 @@ class InMemoryDocumentRepository {
   }
 }
 
-class PostgresDocumentRepository {
+class MySQLDocumentRepository {
   constructor(databasePool) {
     if (!databasePool) {
-      throw new Error('A PostgreSQL pool is required.');
+      throw new Error('A MySQL pool is required.');
     }
     this.pool = databasePool;
   }
@@ -74,31 +81,38 @@ class PostgresDocumentRepository {
     const query = `
       INSERT INTO documents (
         document_id, document_type, original_filename, stored_filename, mime_type, file_size,
-        storage_reference, processing_status, language, created_at, updated_at, created_by_user_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      RETURNING document_id, created_by_user_id, original_filename, document_type AS file_type,
-        stored_filename, mime_type, file_size, storage_reference AS storage_path,
-        processing_status, language, created_at AS uploaded_at, updated_at
+        checksum, storage_reference, processing_status, language, created_at, updated_at, created_by_user_id, land_record_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
-    const result = await this.pool.query(query, [
+    const userId = data.created_by_user_id;
+    if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
+      const error = new Error('An authenticated citizen UUID is required to create a document.');
+      error.statusCode = 401;
+      error.code = 'INVALID_DOCUMENT_OWNER';
+      throw error;
+    }
+    await this.pool.query(query, [
       data.document_id,
-      data.file_type,
-      data.original_filename,
-      data.stored_filename,
-      data.mime_type,
-      data.file_size,
-      data.storage_path,
-      data.processing_status,
-      data.language,
-      data.uploaded_at,
-      data.updated_at,
-      data.created_by_user_id || null,
+      data.file_type || 'pdf',
+      data.original_filename || 'document.pdf',
+      data.stored_filename || data.original_filename || 'document.pdf',
+      data.mime_type || 'application/pdf',
+      data.file_size || 1024,
+      data.checksum || null,
+      data.storage_path || 'uploads/document.pdf',
+      data.processing_status || 'UPLOADED',
+      data.language || null,
+      data.uploaded_at ? new Date(data.uploaded_at) : new Date(),
+      data.updated_at ? new Date(data.updated_at) : new Date(),
+      userId,
+      data.land_record_id || null,
     ]);
+    const persisted = await this.findById(data.document_id);
     return {
       ...data,
-      ...result.rows[0],
+      ...persisted,
       stored_filename: data.stored_filename,
-      processing_status: data.processing_status,
+      processing_status: data.processing_status || 'UPLOADED',
       language: data.language,
       updated_at: data.updated_at,
     };
@@ -106,10 +120,10 @@ class PostgresDocumentRepository {
 
   async findById(documentId) {
     const query = `
-      SELECT document_id, created_by_user_id, original_filename, document_type AS file_type,
+      SELECT document_id, created_by_user_id, land_record_id, checksum, original_filename, document_type AS file_type,
         stored_filename, mime_type, file_size, storage_reference AS storage_path,
         processing_status, language, created_at AS uploaded_at, updated_at
-      FROM documents WHERE document_id = $1
+      FROM documents WHERE document_id = ?
     `;
     const result = await this.pool.query(query, [documentId]);
     if (!result.rows[0]) {
@@ -120,44 +134,58 @@ class PostgresDocumentRepository {
 
   async findByUserId(userId) {
     const query = `
-      SELECT document_id, created_by_user_id, original_filename, document_type AS file_type,
+      SELECT document_id, created_by_user_id, land_record_id, checksum, original_filename, document_type AS file_type,
         stored_filename, mime_type, file_size, storage_reference AS storage_path,
         processing_status, language, created_at AS uploaded_at, updated_at
-      FROM documents WHERE created_by_user_id = $1
+      FROM documents WHERE created_by_user_id = ?
       ORDER BY created_at DESC
     `;
     const result = await this.pool.query(query, [userId]);
     return result.rows;
   }
 
+  async findByChecksumForUser(userId, checksum) {
+    const result = await this.pool.query(
+      'SELECT document_id FROM documents WHERE created_by_user_id = ? AND checksum = ? LIMIT 1',
+      [userId, checksum],
+    );
+    return result.rows[0] || null;
+  }
+
   async updateStatus(documentId, processingStatus) {
     const query = `
       UPDATE documents
-      SET processing_status = $1, updated_at = $2
-      WHERE document_id = $3
-      RETURNING document_id, original_filename, document_type AS file_type,
-        stored_filename, mime_type, file_size, storage_reference AS storage_path,
-        processing_status, language, created_at AS uploaded_at, updated_at
+      SET processing_status = ?, updated_at = NOW(6)
+      WHERE document_id = ?
     `;
-    const result = await this.pool.query(query, [processingStatus, new Date().toISOString(), documentId]);
-    return result.rows[0] || null;
+    const result = await this.pool.query(query, [processingStatus, documentId]);
+    return result.rows.affectedRows ? this.findById(documentId) : null;
+  }
+
+  async updateLandRecordId(documentId, landRecordId) {
+    const query = `
+      UPDATE documents
+      SET land_record_id = ?, updated_at = NOW(6)
+      WHERE document_id = ?
+    `;
+    await this.pool.query(query, [landRecordId, documentId]);
+    return this.findById(documentId);
   }
 
   async saveProcessingResult(documentId, result) {
     const query = `
       INSERT INTO document_processing_results (
         document_id, ocr_result, extraction_result, validation_result, gis_result, review_result, updated_at
-      ) VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb, now())
-      ON CONFLICT (document_id) DO UPDATE SET
-        ocr_result = EXCLUDED.ocr_result,
-        extraction_result = EXCLUDED.extraction_result,
-        validation_result = EXCLUDED.validation_result,
-        gis_result = EXCLUDED.gis_result,
-        review_result = EXCLUDED.review_result,
-        updated_at = now()
-      RETURNING ocr_result, extraction_result, validation_result, gis_result, review_result, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NOW(6))
+      ON DUPLICATE KEY UPDATE
+        ocr_result = VALUES(ocr_result),
+        extraction_result = VALUES(extraction_result),
+        validation_result = VALUES(validation_result),
+        gis_result = VALUES(gis_result),
+        review_result = VALUES(review_result),
+        updated_at = NOW(6)
     `;
-    const stored = await this.pool.query(query, [
+    await this.pool.query(query, [
       documentId,
       JSON.stringify(result.ocr || {}),
       JSON.stringify(result.extraction || {}),
@@ -165,13 +193,28 @@ class PostgresDocumentRepository {
       JSON.stringify(result.gis || {}),
       JSON.stringify(result.review || {}),
     ]);
-    return this._mapProcessingResult(stored.rows[0]);
+
+    const extractionQuery = `
+      INSERT INTO document_extractions (
+        id, document_id, language, ocr_status, extraction_status, raw_text_reference, structured_result, created_at
+      ) VALUES (UUID(), ?, ?, ?, ?, ?, ?, NOW(6))
+    `;
+    await this.pool.query(extractionQuery, [
+      documentId,
+      result.ocr?.language || null,
+      result.ocr?.status || 'COMPLETED',
+      'COMPLETED',
+      null,
+      JSON.stringify(result.extraction || {}),
+    ]);
+
+    return this.getProcessingResult(documentId);
   }
 
   async getProcessingResult(documentId) {
     const query = `
       SELECT ocr_result, extraction_result, validation_result, gis_result, review_result, updated_at
-      FROM document_processing_results WHERE document_id = $1
+      FROM document_processing_results WHERE document_id = ?
     `;
     const result = await this.pool.query(query, [documentId]);
     return result.rows[0] ? this._mapProcessingResult(result.rows[0]) : null;
@@ -191,10 +234,10 @@ class PostgresDocumentRepository {
   async getStats() {
     const query = `
       SELECT 
-        COUNT(*)::int AS total_documents,
-        COUNT(CASE WHEN processing_status = 'PROCESSED' THEN 1 END)::int AS processed_documents,
-        COUNT(CASE WHEN processing_status = 'FAILED' THEN 1 END)::int AS failed_documents,
-        COUNT(CASE WHEN processing_status = 'UPLOADED' THEN 1 END)::int AS uploaded_documents
+        COUNT(*) AS total_documents,
+        SUM(processing_status = 'PROCESSED') AS processed_documents,
+        SUM(processing_status = 'FAILED') AS failed_documents,
+        SUM(processing_status = 'UPLOADED') AS uploaded_documents
       FROM documents
     `;
     const result = await this.pool.query(query);
@@ -208,6 +251,10 @@ class PostgresDocumentRepository {
   }
 }
 
-const documentRepository = pool ? new PostgresDocumentRepository(pool) : new InMemoryDocumentRepository();
+const documentRepository = new MySQLDocumentRepository(pool);
 
-module.exports = { InMemoryDocumentRepository, PostgresDocumentRepository, documentRepository };
+module.exports = {
+  InMemoryDocumentRepository,
+  MySQLDocumentRepository,
+  documentRepository,
+};

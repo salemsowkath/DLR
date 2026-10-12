@@ -1,0 +1,4 @@
+ALTER TABLE users ADD COLUMN username VARCHAR(100) NULL;
+ALTER TABLE users ADD UNIQUE KEY uq_users_username (username);
+ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL;
+ALTER TABLE users ADD COLUMN department VARCHAR(100) NULL;

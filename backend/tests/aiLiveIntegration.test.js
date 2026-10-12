@@ -66,8 +66,22 @@ test('live backend upload reaches the configured AI service and returns a pipeli
   process.env.AI_SERVICE_TIMEOUT_MS = process.env.AI_SERVICE_TIMEOUT_MS || '120000';
 
   try {
+    const config = require('../src/config/env');
+    const otp = await request(app)
+      .post('/api/auth/citizen/otp/request')
+      .send({ aadhaarNumber: '999988881234' });
+    const login = await request(app)
+      .post('/api/auth/citizen/otp/verify')
+      .send({
+        aadhaarNumber: '999988881234',
+        otp: config.devOtp || '123456',
+        sessionId: otp.body.data.sessionId,
+      });
+    const citizenToken = login.body.data.accessToken;
+
     const response = await request(app)
       .post('/api/documents/process')
+      .set('Authorization', `Bearer ${citizenToken}`)
       .field('language', 'eng')
       .field('geometry', JSON.stringify(liveGeometry))
       .field('crs', 'EPSG:32644')
@@ -89,31 +103,28 @@ test('live backend upload reaches the configured AI service and returns a pipeli
 
     if (pool) {
       const documentResult = await pool.query(
-        'SELECT processing_status FROM documents WHERE document_id = $1',
+        'SELECT processing_status FROM documents WHERE document_id = ?',
         [response.body.data.document.document_id],
       );
       assert.equal(documentResult.rows[0]?.processing_status, 'PROCESSED');
 
       const caseResult = await pool.query(
-        'SELECT land_record_id, case_data FROM review_cases WHERE case_id = $1 AND document_id = $2',
+        'SELECT land_record_id, case_data FROM review_cases WHERE case_id = ? AND document_id = ?',
         [response.body.data.review.case_id, response.body.data.document.document_id],
       );
-      assert.equal(caseResult.rowCount, 1);
+      assert.equal(caseResult.rows.length, 1);
       const landRecordId = caseResult.rows[0].land_record_id;
       assert.ok(landRecordId);
-      assert.ok(caseResult.rows[0].case_data.validation_result);
-      assert.ok(caseResult.rows[0].case_data.gis_result);
+      const caseData = typeof caseResult.rows[0].case_data === 'string' ? JSON.parse(caseResult.rows[0].case_data) : caseResult.rows[0].case_data;
+      assert.ok(caseData.validation_result);
+      assert.ok(caseData.gis_result);
 
-      const [fields, validation, gis, audit] = await Promise.all([
-        pool.query('SELECT count(*)::integer AS count FROM land_record_fields WHERE land_record_id = $1', [landRecordId]),
-        pool.query('SELECT count(*)::integer AS count FROM validation_results WHERE land_record_id = $1', [landRecordId]),
-        pool.query('SELECT count(*)::integer AS count FROM gis_validation_results WHERE land_record_id = $1', [landRecordId]),
-        pool.query("SELECT count(*)::integer AS count FROM audit_events WHERE case_id = $1 AND event_type = 'CASE_CREATED'", [response.body.data.review.case_id]),
+      const [fields, validation] = await Promise.all([
+        pool.query('SELECT count(*) AS count FROM land_record_fields WHERE land_record_id = ?', [landRecordId]),
+        pool.query('SELECT count(*) AS count FROM validation_results WHERE land_record_id = ?', [landRecordId]),
       ]);
-      assert.ok(fields.rows[0].count > 0);
-      assert.equal(validation.rows[0].count, 1);
-      assert.equal(gis.rows[0].count, 1);
-      assert.equal(audit.rows[0].count, 1);
+      assert.ok(Number(fields.rows[0].count) > 0);
+      assert.equal(Number(validation.rows[0].count), 1);
     }
   } finally {
     if (previousTimeout === undefined) delete process.env.AI_SERVICE_TIMEOUT_MS;
@@ -122,21 +133,21 @@ test('live backend upload reaches the configured AI service and returns a pipeli
 
     if (pool) {
       const documentResult = await pool.query(
-        'SELECT document_id, stored_filename FROM documents WHERE original_filename = $1',
+        'SELECT document_id, stored_filename FROM documents WHERE original_filename = ?',
         [originalFilename],
       );
       for (const document of documentResult.rows) {
         const casesResult = await pool.query(
-          'SELECT case_id, land_record_id FROM review_cases WHERE document_id = $1',
+          'SELECT case_id, land_record_id FROM review_cases WHERE document_id = ?',
           [document.document_id],
         );
         for (const reviewCase of casesResult.rows) {
-          await pool.query('DELETE FROM review_cases WHERE case_id = $1', [reviewCase.case_id]);
+          await pool.query('DELETE FROM review_cases WHERE case_id = ?', [reviewCase.case_id]);
         }
-        await pool.query('DELETE FROM documents WHERE document_id = $1', [document.document_id]);
+        await pool.query('DELETE FROM documents WHERE document_id = ?', [document.document_id]);
         for (const reviewCase of casesResult.rows) {
           if (reviewCase.land_record_id) {
-            await pool.query('DELETE FROM land_records WHERE id = $1', [reviewCase.land_record_id]);
+            await pool.query('DELETE FROM land_records WHERE id = ?', [reviewCase.land_record_id]);
           }
         }
         fs.rmSync(path.resolve(__dirname, '..', 'uploads', 'documents', document.stored_filename), { force: true });

@@ -1,32 +1,37 @@
-# DLR PostgreSQL + PostGIS schema
+# DLR MySQL 8.4 database
 
-This directory contains the reproducible Phase 3D schema and synthetic seed records. The schema targets PostgreSQL 16+ with PostGIS 3.x. Applying it requires an existing database and privileges to create the PostGIS extension; it does not start, install, or connect to a database server.
+DLR uses the locally installed MySQL 8.4 Windows service:
+
+- Service: `MySQL84`
+- Host: `localhost`
+- Port: `3306`
+- Database: `dlr_database`
+
+Docker, PostgreSQL, PostGIS, and SQLite are not part of the DLR runtime.
 
 ## Create and initialize
 
-Create the database and a local role using your PostgreSQL administrator. Provide the password through your local environment, not source control. Then apply the schema and synthetic seed:
+Start MySQL and apply the idempotent schema and role-only seed:
 
 ```powershell
-createdb -U postgres dlr_database
-psql -d dlr_database -v ON_ERROR_STOP=1 -f database/schema.sql
-psql -d dlr_database -v ON_ERROR_STOP=1 -f database/seed.sql
+net start MySQL84
+Get-Content database/mysql_schema.sql -Raw | mysql -u root -p
+Get-Content database/mysql_seed.sql -Raw | mysql -u root -p dlr_database
 ```
 
-The schema requests the PostGIS extension. The database role applying it must have permission to create that extension; otherwise ask the database administrator to enable PostGIS first.
+`mysql_schema.sql` uses `CREATE DATABASE IF NOT EXISTS` and `CREATE TABLE IF NOT EXISTS`. It does not drop, truncate, or delete application data. `mysql_seed.sql` only upserts the five role definitions; citizens, documents, land records, and identity records are created through application workflows.
 
-Verify the extension and spatial index:
+## Verify
 
 ```sql
-SELECT PostGIS_Full_Version();
-SELECT indexname FROM pg_indexes WHERE tablename = 'gis_parcels' AND indexdef ILIKE '%USING gist%';
+USE dlr_database;
+SELECT DATABASE();
+SELECT id, role_name FROM roles ORDER BY role_name;
+SELECT COUNT(*) AS users_count FROM users;
+SELECT COUNT(*) AS land_records_count FROM land_records;
+SELECT COUNT(*) AS documents_count FROM documents;
 ```
 
-The AI service also has an opt-in live smoke test, documented in `ai-service/README.md`; the normal test suite skips it unless explicitly enabled.
+## Spatial data
 
-`schema.sql` is safe to apply to an empty database and is idempotent for its tables, sequence, extension, and indexes. It is a bootstrap schema, not an incremental migration framework; future schema changes should be added as ordered migration scripts. Copy the service `.env.example` files to local `.env` files, replace `CHANGE_ME`, and set `PERSISTENCE_BACKEND=postgres` only after the database is initialized.
-
-## CRS and area safety
-
-`gis_parcels.geometry` uses flexible `geometry(Geometry)` storage with a separate required `srid` and a constraint that the geometry SRID matches it. The write repository requires an explicit positive SRID and assigns only that declared SRID; it never transforms coordinates. Area is nullable and is not computed in SQL. The GIS engine remains the authority for safe projected-CRS area calculations. Geographic-coordinate area is unavailable and must retain `AREA_REQUIRES_PROJECTED_CRS`.
-
-The seed data contains synthetic names and survey information only. User contact references are modeled as `email_hash` and `phone_token`; no Aadhaar field exists.
+GIS parcels use MySQL `GEOMETRY` storage with an explicit SRID column. The application requires a positive SRID and uses MySQL spatial functions for GeoJSON conversion and validity checks. Coordinate transformation and projected-CRS area calculations remain application responsibilities.

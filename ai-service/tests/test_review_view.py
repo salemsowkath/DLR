@@ -1,8 +1,13 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api.routes.review import review_api_disabled
+from app.services.review.repository import InMemoryReviewCaseRepository
+from app.services.review.service import review_case_service
 
 client = TestClient(app)
+app.dependency_overrides[review_api_disabled] = lambda: None
+review_case_service.repository = InMemoryReviewCaseRepository()
 
 
 def _record() -> dict:
@@ -227,6 +232,16 @@ def test_case_view_returns_case_not_found() -> None:
     response = client.get('/api/v1/review/cases/CASE-999999/view')
     assert response.status_code == 404
     assert response.json()['detail']['error'] == 'CASE_NOT_FOUND'
+
+
+def test_review_api_requires_authorized_backend() -> None:
+    test_override = app.dependency_overrides.pop(review_api_disabled)
+    try:
+        response = client.get('/api/v1/review/cases')
+        assert response.status_code == 403
+        assert 'authenticated backend' in response.json()['detail']
+    finally:
+        app.dependency_overrides[review_api_disabled] = test_override
 
 
 def test_case_list_summary_returns_lightweight_dashboard_rows() -> None:

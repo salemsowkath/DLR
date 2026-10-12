@@ -5,11 +5,43 @@ const jwt = require('jsonwebtoken');
 
 const app = require('../src/app');
 const config = require('../src/config/env');
-const { auditRepository } = require('../src/repositories/auditRepository');
+const { pool } = require('../src/config/database');
 const { userRepository } = require('../src/repositories/userRepository');
-const { otpProvider } = require('../src/services/otpProvider');
 const { resetRateLimiter } = require('../src/middleware/rateLimiter');
 const DocumentMetadata = require('../src/models/documentMetadata');
+const testOtp = config.devOtp || '123456';
+let createdCitizenWithPasswordUsername = '';
+
+function randomAadhaar() {
+  return String(require('crypto').randomInt(0, 1_000_000_000_000)).padStart(12, '0');
+}
+
+async function registerTestCitizen() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const aadhaarNumber = randomAadhaar();
+    const registration = await request(app)
+      .post('/api/auth/citizen/register')
+      .send({
+        aadhaarNumber,
+        fullName: `Access Test ${Date.now()}`,
+        dateOfBirth: '1995-11-20',
+        gender: 'Female',
+        state: 'Tamil Nadu',
+        district: 'Salem',
+        taluk: 'Attur',
+        village: 'Attur Town',
+        pincode: '636102',
+      });
+    if (registration.status === 409) continue;
+    assert.equal(registration.status, 200, registration.text);
+    const verification = await request(app)
+      .post('/api/auth/citizen/otp/verify')
+      .send({ aadhaarNumber, otp: testOtp, sessionId: registration.body.data.sessionId });
+    assert.equal(verification.status, 200, verification.text);
+    return verification.body.data;
+  }
+  throw new Error('Could not create a unique citizen identity for the access-control test.');
+}
 
 test.beforeEach(() => {
   resetRateLimiter();
@@ -36,7 +68,7 @@ test('1. Citizen OTP request returns session ID and masked Aadhaar reference', a
   assert.equal(response.body.success, true);
   assert.equal(response.body.data.maskedAadhaar, 'XXXX-XXXX-1234');
   assert.ok(response.body.data.sessionId);
-  assert.ok(response.body.data.devOtp);
+  assert.equal(response.body.data.devOtp, undefined);
 });
 
 test('2. Citizen OTP verification returns authenticated citizen session and JWT token', async () => {
@@ -44,11 +76,11 @@ test('2. Citizen OTP verification returns authenticated citizen session and JWT 
     .post('/api/auth/citizen/otp/request')
     .send({ aadhaarNumber: '999988881234' });
 
-  const { sessionId, devOtp } = reqRes.body.data;
+  const { sessionId } = reqRes.body.data;
 
   const response = await request(app)
     .post('/api/auth/citizen/otp/verify')
-    .send({ aadhaarNumber: '999988881234', otp: devOtp, sessionId });
+    .send({ aadhaarNumber: '999988881234', otp: testOtp, sessionId });
 
   assert.equal(response.status, 200);
   assert.equal(response.body.success, true);
@@ -80,11 +112,10 @@ test('4. Expired OTP returns 401 Unauthorized', async () => {
 
   const { sessionId } = reqRes.body.data;
 
-  // Artificially expire the session
-  const session = otpProvider.sessions.get(sessionId);
-  if (session) {
-    session.expiresAt = Date.now() - 1000;
-  }
+  await require('../src/config/database').pool.query(
+    'UPDATE otp_verifications SET expires_at = ? WHERE session_id = ?',
+    [new Date(Date.now() - 1000), sessionId],
+  );
 
   const response = await request(app)
     .post('/api/auth/citizen/otp/verify')
@@ -166,7 +197,7 @@ test('11. Citizen accessing officer review API returns 403 Forbidden', async () 
     .send({ aadhaarNumber: '999988881234' });
   const verifyRes = await request(app)
     .post('/api/auth/citizen/otp/verify')
-    .send({ aadhaarNumber: '999988881234', otp: reqRes.body.data.devOtp, sessionId: reqRes.body.data.sessionId });
+    .send({ aadhaarNumber: '999988881234', otp: testOtp, sessionId: reqRes.body.data.sessionId });
 
   const citizenToken = verifyRes.body.data.accessToken;
 
@@ -223,16 +254,16 @@ test('14. Citizen can access their own uploaded document', async () => {
     .send({ aadhaarNumber: '999988881234' });
   const verifyRes = await request(app)
     .post('/api/auth/citizen/otp/verify')
-    .send({ aadhaarNumber: '999988881234', otp: reqRes.body.data.devOtp, sessionId: reqRes.body.data.sessionId });
+    .send({ aadhaarNumber: '999988881234', otp: testOtp, sessionId: reqRes.body.data.sessionId });
   const token = verifyRes.body.data.accessToken;
   const citizenId = verifyRes.body.data.user.id;
 
   // Create a document record owned by citizenId
-  const pdfBuffer = Buffer.from('%PDF-1.4\nCitizen doc');
+  const pdfBuffer = Buffer.from(`%PDF-1.4\nCitizen doc ${Date.now()} ${Math.random()}`);
   const uploadRes = await request(app)
     .post('/api/documents/upload')
     .set('Authorization', `Bearer ${token}`)
-    .attach('file', pdfBuffer, { filename: 'my-deed.pdf', contentType: 'application/pdf' });
+    .attach('file', pdfBuffer, { filename: `my-deed-${Date.now()}.pdf`, contentType: 'application/pdf' });
 
   const documentId = uploadRes.body.data.document_id;
 
@@ -247,22 +278,21 @@ test('14. Citizen can access their own uploaded document', async () => {
 });
 
 test("15. Citizen cannot access another citizen's document (returns 403 Forbidden)", async () => {
-  // Citizen 1
-  const req1 = await request(app).post('/api/auth/citizen/otp/request').send({ aadhaarNumber: '111122223333' });
-  const ver1 = await request(app).post('/api/auth/citizen/otp/verify').send({ aadhaarNumber: '111122223333', otp: req1.body.data.devOtp, sessionId: req1.body.data.sessionId });
-  const token1 = ver1.body.data.accessToken;
-
-  // Citizen 2
-  const req2 = await request(app).post('/api/auth/citizen/otp/request').send({ aadhaarNumber: '444455556666' });
-  const ver2 = await request(app).post('/api/auth/citizen/otp/verify').send({ aadhaarNumber: '444455556666', otp: req2.body.data.devOtp, sessionId: req2.body.data.sessionId });
-  const token2 = ver2.body.data.accessToken;
+  const citizen1Request = await request(app)
+    .post('/api/auth/citizen/otp/request')
+    .send({ aadhaarNumber: '999988881234' });
+  const citizen1Login = await request(app)
+    .post('/api/auth/citizen/otp/verify')
+    .send({ aadhaarNumber: '999988881234', otp: testOtp, sessionId: citizen1Request.body.data.sessionId });
+  const token1 = citizen1Login.body.data.accessToken;
+  const token2 = (await registerTestCitizen()).accessToken;
 
   // Citizen 1 uploads a document
-  const pdfBuffer = Buffer.from('%PDF-1.4\nCitizen 1 private doc');
+  const pdfBuffer = Buffer.from(`%PDF-1.4\nCitizen 1 private doc ${Date.now()} ${Math.random()}`);
   const uploadRes = await request(app)
     .post('/api/documents/upload')
     .set('Authorization', `Bearer ${token1}`)
-    .attach('file', pdfBuffer, { filename: 'private.pdf', contentType: 'application/pdf' });
+    .attach('file', pdfBuffer, { filename: `private-${Date.now()}.pdf`, contentType: 'application/pdf' });
 
   const docId = uploadRes.body.data.document_id;
 
@@ -286,12 +316,18 @@ test('16. Officer can access authorized review case details', async () => {
   const token = loginRes.body.data.accessToken;
 
   await withEnforcedAuth(async () => {
+    const listResponse = await request(app)
+      .get('/api/review/cases')
+      .set('Authorization', `Bearer ${token}`);
+    assert.equal(listResponse.status, 200, listResponse.text);
+    const reviewCase = listResponse.body.data.cases[0];
+    assert.ok(reviewCase?.case_id, 'Expected an available review case.');
     const response = await request(app)
-      .get('/api/review/cases/CASE-TEST-001')
+      .get(`/api/review/cases/${reviewCase.case_id}`)
       .set('Authorization', `Bearer ${token}`);
 
     assert.equal(response.status, 200);
-    assert.equal(response.body.data.case_id, 'CASE-TEST-001');
+    assert.equal(response.body.data.case_id, reviewCase.case_id);
   });
 });
 
@@ -301,7 +337,7 @@ test('17. Unauthorized review action (Citizen attempting review approve) is bloc
     .send({ aadhaarNumber: '999988881234' });
   const verifyRes = await request(app)
     .post('/api/auth/citizen/otp/verify')
-    .send({ aadhaarNumber: '999988881234', otp: reqRes.body.data.devOtp, sessionId: reqRes.body.data.sessionId });
+    .send({ aadhaarNumber: '999988881234', otp: testOtp, sessionId: reqRes.body.data.sessionId });
   const citizenToken = verifyRes.body.data.accessToken;
 
   await withEnforcedAuth(async () => {
@@ -315,15 +351,16 @@ test('17. Unauthorized review action (Citizen attempting review approve) is bloc
 });
 
 test('18. Audit events are recorded for important auth events', async () => {
-  auditRepository.events = []; // Reset in-memory audit events
-
-  await request(app)
+  const login = await request(app)
     .post('/api/auth/officer/login')
     .send({ username: 'DEMO-OFFICER-001', password: 'OfficerPass123!' });
 
-  const events = await auditRepository.getEvents();
-  assert.ok(events.length > 0);
-  assert.ok(events.some((e) => e.event_type === 'LOGIN_SUCCESS'));
+  assert.equal(login.status, 200);
+  const events = await pool.query(
+    'SELECT event_type FROM audit_events WHERE actor_reference = ? AND event_type = ? ORDER BY created_at DESC LIMIT 1',
+    [login.body.data.user.id, 'LOGIN_SUCCESS'],
+  );
+  assert.equal(events.rows[0]?.event_type, 'LOGIN_SUCCESS');
 });
 
 test('19. Password hash never appears in API login or user profile responses', async () => {
@@ -388,8 +425,10 @@ test('22. Maximum OTP verification attempts triggers 401 MAX_OTP_ATTEMPTS_EXCEED
 });
 
 test('23. Citizen account cannot authenticate through officer login endpoint (403)', async () => {
-  const citizenWithPass = await userRepository.create({
-    external_reference: 'CITIZEN-WITH-PASS',
+  const username = `CITIZEN-WITH-PASS-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  createdCitizenWithPasswordUsername = username;
+  await userRepository.create({
+    external_reference: username,
     name: 'Citizen With Password',
     password_hash: require('bcryptjs').hashSync('CitizenPass123!', 10),
     status: 'ACTIVE',
@@ -398,7 +437,7 @@ test('23. Citizen account cannot authenticate through officer login endpoint (40
 
   const response = await request(app)
     .post('/api/auth/officer/login')
-    .send({ username: 'CITIZEN-WITH-PASS', password: 'CitizenPass123!' });
+    .send({ username, password: 'CitizenPass123!' });
 
   assert.equal(response.status, 403);
   assert.equal(response.body.success, false);
@@ -408,7 +447,7 @@ test('23. Citizen account cannot authenticate through officer login endpoint (40
 test('24. Citizen account cannot authenticate through minister login endpoint (403)', async () => {
   const response = await request(app)
     .post('/api/auth/minister/login')
-    .send({ username: 'CITIZEN-WITH-PASS', password: 'CitizenPass123!' });
+    .send({ username: createdCitizenWithPasswordUsername, password: 'CitizenPass123!' });
 
   assert.equal(response.status, 403);
   assert.equal(response.body.success, false);
@@ -417,7 +456,7 @@ test('24. Citizen account cannot authenticate through minister login endpoint (4
 
 test('25. Citizen attempting to access admin dashboard returns 403 Forbidden', async () => {
   const reqRes = await request(app).post('/api/auth/citizen/otp/request').send({ aadhaarNumber: '999988881234' });
-  const verifyRes = await request(app).post('/api/auth/citizen/otp/verify').send({ aadhaarNumber: '999988881234', otp: reqRes.body.data.devOtp, sessionId: reqRes.body.data.sessionId });
+  const verifyRes = await request(app).post('/api/auth/citizen/otp/verify').send({ aadhaarNumber: '999988881234', otp: testOtp, sessionId: reqRes.body.data.sessionId });
   const citizenToken = verifyRes.body.data.accessToken;
 
   await withEnforcedAuth(async () => {
@@ -432,7 +471,7 @@ test('25. Citizen attempting to access admin dashboard returns 403 Forbidden', a
 
 test('26. Citizen can retrieve own applications via GET /api/documents/applications/mine', async () => {
   const reqRes = await request(app).post('/api/auth/citizen/otp/request').send({ aadhaarNumber: '999988881234' });
-  const verifyRes = await request(app).post('/api/auth/citizen/otp/verify').send({ aadhaarNumber: '999988881234', otp: reqRes.body.data.devOtp, sessionId: reqRes.body.data.sessionId });
+  const verifyRes = await request(app).post('/api/auth/citizen/otp/verify').send({ aadhaarNumber: '999988881234', otp: testOtp, sessionId: reqRes.body.data.sessionId });
   const citizenToken = verifyRes.body.data.accessToken;
 
   await withEnforcedAuth(async () => {
@@ -480,8 +519,9 @@ test('28. Expired JWT token is rejected with 401 TOKEN_EXPIRED', async () => {
 });
 
 test('29. Inactive user account is rejected upon token verification', async () => {
+  const externalReference = `SUSPENDED-USER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const suspendedUser = await userRepository.create({
-    external_reference: 'SUSPENDED-USER-001',
+    external_reference: externalReference,
     name: 'Suspended User',
     status: 'SUSPENDED',
     roles: ['CITIZEN'],
@@ -526,10 +566,10 @@ test('30. Admin user login and access to admin dashboard returns 200 with dynami
 test('31. Aadhaar number is masked in responses and logs', async () => {
   const response = await request(app)
     .post('/api/auth/citizen/otp/request')
-    .send({ aadhaarNumber: '123456789012' });
+    .send({ aadhaarNumber: '999988881234' });
 
   assert.equal(response.status, 200);
-  assert.equal(response.body.data.maskedAadhaar, 'XXXX-XXXX-9012');
+  assert.equal(response.body.data.maskedAadhaar, 'XXXX-XXXX-1234');
   assert.equal(response.body.data.aadhaarNumber, undefined);
 });
 
@@ -644,10 +684,14 @@ test('36. Citizen Registration fails if identity is already registered (409)', a
 });
 
 test('37. Complete Citizen Registration -> OTP Verification -> DB User Creation -> Login -> GET /api/auth/me', async () => {
+  const randSuffix = String(Math.floor(1000 + Math.random() * 9000));
+  const testAadhaar = `77776666${randSuffix}`;
+  const maskedExpected = `XXXX-XXXX-${randSuffix}`;
+
   const regRes = await request(app)
     .post('/api/auth/citizen/register')
     .send({
-      aadhaarNumber: '777766665555',
+      aadhaarNumber: testAadhaar,
       fullName: 'Ramesh Kumar',
       dateOfBirth: '1985-05-15',
       gender: 'Male',
@@ -660,16 +704,16 @@ test('37. Complete Citizen Registration -> OTP Verification -> DB User Creation 
 
   assert.equal(regRes.status, 200);
   assert.equal(regRes.body.success, true);
-  assert.equal(regRes.body.data.maskedAadhaar, 'XXXX-XXXX-5555');
+  assert.equal(regRes.body.data.maskedAadhaar, maskedExpected);
   assert.ok(regRes.body.data.sessionId);
-  assert.ok(regRes.body.data.devOtp);
+  assert.equal(regRes.body.data.devOtp, undefined);
 
-  const { sessionId, devOtp } = regRes.body.data;
+  const { sessionId } = regRes.body.data;
 
   // Verify OTP & create citizen in DB
   const verifyRes = await request(app)
     .post('/api/auth/citizen/otp/verify')
-    .send({ aadhaarNumber: '777766665555', otp: devOtp, sessionId });
+    .send({ aadhaarNumber: testAadhaar, otp: testOtp, sessionId });
 
   assert.equal(verifyRes.status, 200);
   assert.equal(verifyRes.body.success, true);
@@ -699,16 +743,16 @@ test('37. Complete Citizen Registration -> OTP Verification -> DB User Creation 
   // Subsequent Login using registered Aadhaar should succeed
   const loginOtpReq = await request(app)
     .post('/api/auth/citizen/otp/request')
-    .send({ aadhaarNumber: '777766665555' });
+    .send({ aadhaarNumber: testAadhaar });
 
   assert.equal(loginOtpReq.status, 200);
-  assert.equal(loginOtpReq.body.data.maskedAadhaar, 'XXXX-XXXX-5555');
+  assert.equal(loginOtpReq.body.data.maskedAadhaar, maskedExpected);
 
   const loginVerify = await request(app)
     .post('/api/auth/citizen/otp/verify')
     .send({
-      aadhaarNumber: '777766665555',
-      otp: loginOtpReq.body.data.devOtp,
+      aadhaarNumber: testAadhaar,
+      otp: testOtp,
       sessionId: loginOtpReq.body.data.sessionId,
     });
 
@@ -725,4 +769,3 @@ test('38. Unregistered citizen login request returns 404 CITIZEN_NOT_FOUND', asy
   assert.equal(res.body.success, false);
   assert.equal(res.body.error.code, 'CITIZEN_NOT_FOUND');
 });
-

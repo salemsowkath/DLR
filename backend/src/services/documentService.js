@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { documentRepository } = require('../repositories/documentRepository');
 const {
   normalizeExtension,
@@ -7,6 +8,7 @@ const {
   generateDocumentId,
   validateFileSignature,
   ALLOWED_FILE_TYPES,
+  MAX_FILE_SIZE,
 } = require('./fileStorageService');
 
 function createAppError(statusCode, code, message) {
@@ -31,6 +33,7 @@ function buildDocumentRecord(file, storedFilePath, userId = null) {
     file_type: fileType,
     mime_type: file.mimetype,
     file_size: file.size,
+    checksum: crypto.createHash('sha256').update(fs.readFileSync(file.path)).digest('hex'),
     storage_path: relativeStoragePath,
     processing_status: 'UPLOADED',
     language: null,
@@ -51,8 +54,8 @@ async function uploadDocument(req) {
     throw createAppError(415, 'INVALID_FILE_TYPE', 'Unsupported file type. Only PDF, JPG, JPEG, and PNG are allowed.');
   }
 
-  if (req.file.size > 5 * 1024 * 1024) {
-    throw createAppError(413, 'FILE_TOO_LARGE', 'Uploaded document exceeds the 5MB size limit.');
+  if (req.file.size > MAX_FILE_SIZE) {
+    throw createAppError(413, 'FILE_TOO_LARGE', 'File exceeds the 10 MB limit.');
   }
 
   try {
@@ -66,10 +69,16 @@ async function uploadDocument(req) {
   const documentRecord = buildDocumentRecord(req.file, req.file.path, userId);
   let savedRecord;
   try {
+    if (userId && await documentRepository.findByChecksumForUser(userId, documentRecord.checksum)) {
+      throw createAppError(409, 'DUPLICATE_DOCUMENT', 'This document has already been uploaded to your account.');
+    }
     savedRecord = await documentRepository.create(documentRecord);
   } catch (error) {
     if (fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
+    }
+    if (error.code === 'ER_DUP_ENTRY') {
+      throw createAppError(409, 'DUPLICATE_DOCUMENT', 'This document has already been uploaded to your account.');
     }
     throw error;
   }
@@ -95,6 +104,11 @@ async function updateDocumentStatus(documentId, processingStatus) {
   return record;
 }
 
+async function updateDocumentLandRecord(documentId, landRecordId) {
+  const record = await documentRepository.updateLandRecordId(documentId, landRecordId);
+  return record;
+}
+
 async function getDocumentsByUserId(userId) {
   return documentRepository.findByUserId(userId);
 }
@@ -107,6 +121,10 @@ async function getProcessingResult(documentId) {
   return documentRepository.getProcessingResult(documentId);
 }
 
+function getAbsoluteStoragePath(relativePath) {
+  return path.resolve(__dirname, '../../', relativePath);
+}
+
 module.exports = {
   uploadDocument,
   getDocumentById,
@@ -114,4 +132,6 @@ module.exports = {
   saveProcessingResult,
   getProcessingResult,
   updateDocumentStatus,
+  updateDocumentLandRecord,
+  getAbsoluteStoragePath,
 };

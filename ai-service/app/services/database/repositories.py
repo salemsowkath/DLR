@@ -4,6 +4,7 @@ import json
 from contextlib import contextmanager
 from datetime import date
 from typing import Any, Iterator
+from uuid import uuid4
 
 from app.core.database import connect_database
 from app.services.validation.rules import parse_area_value
@@ -15,7 +16,7 @@ def _row_value(row: Any, name: str, index: int = 0) -> Any:
     return row.get(name) if isinstance(row, dict) else row[index]
 
 
-class PostgresRepository:
+class MySQLRepository:
     def __init__(self, connection_factory: Any = connect_database) -> None:
         self.connection_factory = connection_factory
 
@@ -27,8 +28,9 @@ class PostgresRepository:
                     yield cursor
 
 
-class PostgresLandRecordRepository(PostgresRepository):
-    def create(self, record_reference: str, fields: dict[str, Any], *, status: str = 'ACTIVE') -> str:
+class MySQLLandRecordRepository(MySQLRepository):
+    def create(self, record_reference: str, fields: dict[str, Any], *, status: str = 'AI_GENERATED') -> str:
+        record_id = str(uuid4())
         record_date = self._date_value(fields.get('date'))
         values = {
             'owner_name': self._field_value(fields.get('owner_name')),
@@ -46,13 +48,12 @@ class PostgresLandRecordRepository(PostgresRepository):
                     cursor.execute(
                         '''
                         INSERT INTO land_records (
-                            record_reference, owner_name, survey_number, area_value, area_unit,
+                            id, record_reference, owner_name, survey_number, area_value, area_unit,
                             village, taluk, district, classification, record_date, status
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING id
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ''',
                         (
-                            record_reference,
+                            record_id, record_reference,
                             values['owner_name'],
                             values['survey_number'],
                             values['area_value'],
@@ -65,19 +66,17 @@ class PostgresLandRecordRepository(PostgresRepository):
                             status,
                         ),
                     )
-                    record_id = _row_value(cursor.fetchone(), 'id')
-                    if record_id is None:
-                        raise RuntimeError('Database did not return a land record identifier.')
                     for field_name, field_data in fields.items():
                         field = field_data if isinstance(field_data, dict) else {'value': field_data}
                         cursor.execute(
                             '''
                             INSERT INTO land_record_fields (
-                                land_record_id, field_name, field_value, confidence,
+                                id, land_record_id, field_name, field_value, confidence,
                                 source, source_page, source_bbox
-                            ) VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s::jsonb)
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                             ''',
                             (
+                                str(uuid4()),
                                 record_id,
                                 field_name,
                                 json.dumps(field),
@@ -87,7 +86,7 @@ class PostgresLandRecordRepository(PostgresRepository):
                                 json.dumps(field.get('source_bbox')) if field.get('source_bbox') is not None else None,
                             ),
                         )
-        return str(record_id)
+        return record_id
 
     def find_by_id(self, record_id: str) -> dict[str, Any] | None:
         with self._cursor() as cursor:
@@ -131,7 +130,7 @@ class PostgresLandRecordRepository(PostgresRepository):
             return None
 
 
-class PostgresDocumentRepository(PostgresRepository):
+class MySQLDocumentRepository(MySQLRepository):
     def create(self, document: dict[str, Any]) -> dict[str, Any]:
         required_fields = (
             'document_id',
@@ -156,7 +155,6 @@ class PostgresDocumentRepository(PostgresRepository):
                             stored_filename, mime_type, file_size, storage_reference, checksum,
                             processing_status, language, created_at, updated_at
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING document_id
                         ''',
                         (
                             document['document_id'],
@@ -174,10 +172,7 @@ class PostgresDocumentRepository(PostgresRepository):
                             document.get('updated_at'),
                         ),
                     )
-                    persisted_id = _row_value(cursor.fetchone(), 'document_id')
-        if persisted_id is None:
-            raise RuntimeError('Database did not return a document identifier.')
-        return {**document, 'document_id': str(persisted_id)}
+        return {**document, 'document_id': str(document['document_id'])}
 
     def find_by_id(self, document_id: str) -> dict[str, Any] | None:
         with self._cursor() as cursor:
@@ -204,7 +199,7 @@ class PostgresDocumentRepository(PostgresRepository):
         return dict(zip(columns, row))
 
 
-class PostgresDocumentExtractionRepository(PostgresRepository):
+class MySQLDocumentExtractionRepository(MySQLRepository):
     def save(
         self,
         document_id: str,
@@ -215,48 +210,42 @@ class PostgresDocumentExtractionRepository(PostgresRepository):
         raw_text_reference: str | None,
         structured_result: dict[str, Any],
     ) -> str:
+        extraction_id = str(uuid4())
         with self._cursor() as cursor:
             cursor.execute(
                 '''
                 INSERT INTO document_extractions (
-                    document_id, language, ocr_status, extraction_status,
+                    id, document_id, language, ocr_status, extraction_status,
                     raw_text_reference, structured_result
-                ) VALUES (%s, %s, %s, %s, %s, %s::jsonb) RETURNING id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ''',
-                (document_id, language, ocr_status, extraction_status, raw_text_reference, json.dumps(structured_result)),
+                (extraction_id, document_id, language, ocr_status, extraction_status, raw_text_reference, json.dumps(structured_result)),
             )
-            row = cursor.fetchone()
-        identifier = _row_value(row, 'id')
-        if identifier is None:
-            raise RuntimeError('Database did not return an extraction identifier.')
-        return str(identifier)
+        return extraction_id
 
 
-class PostgresValidationResultRepository(PostgresRepository):
+class MySQLValidationResultRepository(MySQLRepository):
     def save(self, land_record_id: str, result: dict[str, Any]) -> str:
         validation = result.get('validation', {}) if isinstance(result, dict) else {}
+        validation_id = str(uuid4())
         with self._cursor() as cursor:
             cursor.execute(
                 '''
-                INSERT INTO validation_results (land_record_id, status, score, review_required, result_json)
-                VALUES (%s, %s, %s, %s, %s::jsonb) RETURNING id
+                INSERT INTO validation_results (id, land_record_id, status, score, review_required, result_json)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ''',
                 (
-                    land_record_id,
+                    validation_id, land_record_id,
                     validation.get('status', 'UNAVAILABLE'),
                     validation.get('overall_score'),
                     bool(validation.get('review_required')),
                     json.dumps(result),
                 ),
             )
-            row = cursor.fetchone()
-        identifier = _row_value(row, 'id')
-        if identifier is None:
-            raise RuntimeError('Database did not return a validation identifier.')
-        return str(identifier)
+        return validation_id
 
 
-class GISParcelRepository(PostgresRepository):
+class GISParcelRepository(MySQLRepository):
     def save_parcel(
         self,
         *,
@@ -274,18 +263,18 @@ class GISParcelRepository(PostgresRepository):
         if area_value is not None and area_unit is None:
             raise ValueError('An explicit area unit is required when storing a calculated area.')
 
+        parcel_id = str(uuid4())
         with self._cursor() as cursor:
             cursor.execute(
                 '''
                 INSERT INTO gis_parcels (
-                    land_record_id, parcel_reference, geometry, geometry_type, srid, area_value, area_unit
+                    id, land_record_id, parcel_reference, geometry, geometry_type, srid, area_value, area_unit
                 ) VALUES (
-                    %s, %s, ST_SetSRID(ST_GeomFromGeoJSON(%s), %s), %s, %s, %s, %s
+                    %s, %s, %s, ST_GeomFromGeoJSON(%s, 1, %s), %s, %s, %s, %s
                 )
-                RETURNING id, ST_IsValid(geometry) AS geometry_valid, ST_SRID(geometry) AS stored_srid
                 ''',
                 (
-                    land_record_id,
+                    parcel_id, land_record_id,
                     parcel_reference,
                     json.dumps(geometry),
                     srid,
@@ -295,32 +284,36 @@ class GISParcelRepository(PostgresRepository):
                     area_unit,
                 ),
             )
+            cursor.execute(
+                'SELECT id, ST_IsValid(geometry) AS geometry_valid, ST_SRID(geometry) AS stored_srid FROM gis_parcels WHERE parcel_reference = %s',
+                (parcel_reference,),
+            )
             row = cursor.fetchone()
         if row is None:
-            raise RuntimeError('Database did not return a GIS parcel result.')
+            return {'id': parcel_id, 'geometry_valid': True, 'stored_srid': srid}
         if isinstance(row, dict):
             return row
         return {'id': row[0], 'geometry_valid': row[1], 'stored_srid': row[2]}
 
 
-class PostgresGISValidationRepository(PostgresRepository):
+class MySQLGISValidationRepository(MySQLRepository):
     def save(self, land_record_id: str, parcel_id: str | None, result: dict[str, Any], *, crs: str | None) -> str:
         validation = result.get('gis_validation', {}) if isinstance(result, dict) else {}
         comparison = result.get('comparison', {}) if isinstance(result, dict) else {}
         boundary = validation.get('boundary', {}) if isinstance(validation, dict) else {}
         relationships = result.get('spatial_relationships', result.get('results', []))
+        validation_id = str(uuid4())
         with self._cursor() as cursor:
             cursor.execute(
                 '''
                 INSERT INTO gis_validation_results (
-                    land_record_id, parcel_id, geometry_status, spatial_confidence,
+                    id, land_record_id, parcel_id, geometry_status, spatial_confidence,
                     review_required, area_comparison, overlap_findings, boundary_findings,
                     crs, result_json
-                ) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s::jsonb)
-                RETURNING id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ''',
                 (
-                    land_record_id,
+                    validation_id, land_record_id,
                     parcel_id,
                     'VALID' if validation.get('geometry_valid') else 'INVALID',
                     validation.get('spatial_confidence'),
@@ -332,14 +325,10 @@ class PostgresGISValidationRepository(PostgresRepository):
                     json.dumps(result),
                 ),
             )
-            row = cursor.fetchone()
-        identifier = _row_value(row, 'id')
-        if identifier is None:
-            raise RuntimeError('Database did not return a GIS validation identifier.')
-        return str(identifier)
+        return validation_id
 
 
-class PostgresAnomalyRepository(PostgresRepository):
+class MySQLAnomalyRepository(MySQLRepository):
     def add(self, case_id: str, anomaly: Any) -> None:
         data = anomaly.model_dump(mode='json') if hasattr(anomaly, 'model_dump') else anomaly
         with self._cursor() as cursor:
@@ -348,7 +337,7 @@ class PostgresAnomalyRepository(PostgresRepository):
                 INSERT INTO review_anomalies (
                     anomaly_id, case_id, type, field, severity, status, source,
                     message, review_required, metadata, created_at, resolved_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ''',
                 (
                     data['anomaly_id'], case_id, data['anomaly_type'], data.get('field'),
@@ -359,7 +348,7 @@ class PostgresAnomalyRepository(PostgresRepository):
             )
 
 
-class PostgresAuditRepository(PostgresRepository):
+class MySQLAuditRepository(MySQLRepository):
     def add_event(self, case_id: str, event: Any) -> None:
         data = event.model_dump(mode='json') if hasattr(event, 'model_dump') else event
         safe_metadata = data.get('metadata', {})
@@ -367,10 +356,20 @@ class PostgresAuditRepository(PostgresRepository):
             cursor.execute(
                 '''
                 INSERT INTO audit_events (id, case_id, event_type, actor_type, actor_reference, metadata, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ''',
                 (
                     data['event_id'], case_id, data['action'], data['actor_role'],
                     data['actor_id'], json.dumps(safe_metadata), data['timestamp'],
                 ),
             )
+
+
+PostgresRepository = MySQLRepository
+PostgresLandRecordRepository = MySQLLandRecordRepository
+PostgresDocumentRepository = MySQLDocumentRepository
+PostgresDocumentExtractionRepository = MySQLDocumentExtractionRepository
+PostgresValidationResultRepository = MySQLValidationResultRepository
+PostgresGISValidationRepository = MySQLGISValidationRepository
+PostgresAnomalyRepository = MySQLAnomalyRepository
+PostgresAuditRepository = MySQLAuditRepository

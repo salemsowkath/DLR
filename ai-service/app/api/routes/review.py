@@ -3,13 +3,24 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.models.review_view import OfficerReviewViewResponse
 from app.services.review.service import review_case_service
 
-router = APIRouter(prefix='/api/v1/review', tags=['review'])
+async def review_api_disabled() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail='Review data and officer actions are available only through the authenticated backend.',
+    )
+
+
+router = APIRouter(
+    prefix='/api/v1/review',
+    tags=['review'],
+    dependencies=[Depends(review_api_disabled)],
+)
 
 
 class CaseCreateRequest(BaseModel):

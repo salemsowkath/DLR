@@ -1,0 +1,6 @@
+{
+  "files.associations": {
+    "database/mysql_schema.sql": "sql",
+    "database/mysql_seed.sql": "sql"
+  }
+}

@@ -60,7 +60,14 @@ def normalize_output_language(language: str | None, default: str = 'en') -> str:
     candidate = (language or default).strip().lower()
     if not candidate:
         return default
+    if '+' in candidate:
+        parts = [p.strip() for p in candidate.split('+')]
+        for p in parts:
+            if p in LANGUAGE_ALIASES:
+                return LANGUAGE_ALIASES[p]
+        return default
     normalized = LANGUAGE_ALIASES.get(candidate)
     if normalized is not None:
         return normalized
     raise ValueError('Unsupported language. Supported languages are Tamil, English and Hindi.')
+

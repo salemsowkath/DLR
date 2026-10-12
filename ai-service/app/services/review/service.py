@@ -23,7 +23,7 @@ from app.models.review_view import (
     ValidationView,
 )
 from app.services.review.gis_adapter import gis_review_adapter
-from app.services.review.repository import InMemoryAnomalyRepository, InMemoryAuditRepository, InMemoryReviewCaseRepository, ReviewCaseRepository
+from app.services.review.repository import InMemoryAnomalyRepository, InMemoryAuditRepository, ReviewCaseRepository
 from app.services.gis.area import GIS_AREA_TOLERANCE_PERCENT
 from app.services.validation.confidence import get_confidence_level
 from app.services.validation.engine import validation_engine
@@ -845,7 +845,7 @@ class ReviewCaseService:
             return None
         return value.get('source_page')
 
-    def _extract_source_bbox(self, record: dict[str, Any], field: str) -> list[int] | None:
+    def _extract_source_bbox(self, record: dict[str, Any], field: str) -> list[int] | dict[str, Any] | None:
         value = record.get(field)
         if not isinstance(value, dict):
             return None
@@ -854,13 +854,11 @@ class ReviewCaseService:
 
 def _configured_review_repository() -> ReviewCaseRepository:
     backend = settings.persistence_backend.strip().lower()
-    if backend == 'memory':
-        return InMemoryReviewCaseRepository()
-    if backend == 'postgres':
-        from app.services.review.postgres_repository import PostgresReviewRepository
+    if backend == 'mysql':
+        from app.services.review.mysql_repository import MySQLReviewRepository
 
-        return PostgresReviewRepository()
-    raise ValueError('PERSISTENCE_BACKEND must be either memory or postgres.')
+        return MySQLReviewRepository()
+    raise ValueError('PERSISTENCE_BACKEND must be mysql. Memory persistence is not supported.')
 
 
 review_case_service = ReviewCaseService(repository=_configured_review_repository())

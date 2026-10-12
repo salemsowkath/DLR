@@ -14,7 +14,7 @@ class ValidationCheck(BaseModel):
     value: Any | None = None
     confidence: float | None = None
     source_page: int | None = None
-    source_bbox: dict[str, Any] | None = None
+    source_bbox: dict[str, Any] | list[Any] | None = None
 
 
 class ValidationSummary(BaseModel):

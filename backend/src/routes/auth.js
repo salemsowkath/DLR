@@ -12,6 +12,8 @@ router.post('/citizen/otp/request', authRateLimit, authController.requestCitizen
 router.post('/citizen/otp/verify', authRateLimit, authController.verifyCitizenOtp);
 router.post('/officer/login', authRateLimit, authController.officerLogin);
 router.post('/minister/login', authRateLimit, authController.ministerLogin);
+router.post('/state-admin/login', authRateLimit, authController.stateAdminLogin);
+router.post('/super-admin/login', authRateLimit, authController.superAdminLogin);
 
 router.get('/me', requireAuth, authController.getMe);
 router.post('/logout', requireAuth, authController.logout);

@@ -101,7 +101,6 @@ class AuthService {
       maskedAadhaar: maskedRef,
       sessionId: otpResult.sessionId,
       expiresAt: otpResult.expiresAt,
-      devOtp: otpResult.devOtp,
     };
   }
 
@@ -138,7 +137,6 @@ class AuthService {
       maskedAadhaar: maskedRef,
       sessionId: otpResult.sessionId,
       expiresAt: otpResult.expiresAt,
-      devOtp: otpResult.devOtp,
     };
   }
 
@@ -215,18 +213,19 @@ class AuthService {
     };
   }
 
-  async loginOfficer({ username, password }) {
-    if (!username || !password) {
+  async loginOfficer({ username, identifier, password }) {
+    const loginUser = username || identifier;
+    if (!loginUser || !password) {
       throw createAppError(400, 'MISSING_CREDENTIALS', 'Username and password are required.');
     }
 
-    const user = await this.users.findByUsername(username);
+    const user = await this.users.findByUsername(loginUser);
 
     if (!user || user.status !== 'ACTIVE' || !user.password_hash) {
       await this.audit.logAuditEvent({
         eventType: 'LOGIN_FAILED',
         actorType: 'OFFICER',
-        actorReference: String(username),
+        actorReference: String(loginUser),
         metadata: { reason: 'User not found or inactive' },
       });
       throw createAppError(401, 'INVALID_CREDENTIALS', 'Invalid username or password.');
@@ -273,18 +272,19 @@ class AuthService {
     };
   }
 
-  async loginMinister({ username, password }) {
-    if (!username || !password) {
+  async loginMinister({ username, identifier, password }) {
+    const loginUser = username || identifier;
+    if (!loginUser || !password) {
       throw createAppError(400, 'MISSING_CREDENTIALS', 'Username and password are required.');
     }
 
-    const user = await this.users.findByUsername(username);
+    const user = await this.users.findByUsername(loginUser);
 
     if (!user || user.status !== 'ACTIVE' || !user.password_hash) {
       await this.audit.logAuditEvent({
         eventType: 'LOGIN_FAILED',
         actorType: 'MINISTER',
-        actorReference: String(username),
+        actorReference: String(loginUser),
         metadata: { reason: 'User not found or inactive' },
       });
       throw createAppError(401, 'INVALID_CREDENTIALS', 'Invalid username or password.');
@@ -327,6 +327,138 @@ class AuthService {
       success: true,
       user: user.toPublicJSON(),
       accessToken,
+      expiresIn: 3600,
+    };
+  }
+
+  async loginStateAdmin({ username, identifier, password }) {
+    const loginUser = username || identifier;
+    if (!loginUser || !password) {
+      throw createAppError(400, 'MISSING_CREDENTIALS', 'Username and password are required.');
+    }
+
+    const user = await this.users.findByUsername(loginUser);
+
+    if (!user || user.status !== 'ACTIVE' || !user.password_hash) {
+      await this.audit.logAuditEvent({
+        eventType: 'LOGIN_FAILED',
+        actorType: 'STATE_ADMIN',
+        actorReference: String(loginUser),
+        metadata: { reason: 'User not found or inactive' },
+      });
+      throw createAppError(401, 'INVALID_CREDENTIALS', 'Invalid username or password.');
+    }
+
+    const isValidPassword = await verifyPassword(password, user.password_hash);
+    if (!isValidPassword) {
+      await this.audit.logAuditEvent({
+        eventType: 'LOGIN_FAILED',
+        actorType: 'STATE_ADMIN',
+        actorReference: user.id,
+        metadata: { reason: 'Invalid password' },
+      });
+      throw createAppError(401, 'INVALID_CREDENTIALS', 'Invalid username or password.');
+    }
+
+    const roles = Array.isArray(user.roles) ? user.roles : [user.roles];
+    const isStateAdmin = roles.some((r) => String(r).toUpperCase() === 'STATE_ADMIN');
+
+    if (!isStateAdmin) {
+      await this.audit.logAuditEvent({
+        eventType: 'LOGIN_FAILED',
+        actorType: 'STATE_ADMIN',
+        actorReference: user.id,
+        metadata: { reason: 'User lacks STATE_ADMIN role' },
+      });
+      throw createAppError(403, 'FORBIDDEN', 'User is not authorized for State Admin role.');
+    }
+
+    if (!user.state && !user.state_id) {
+      throw createAppError(500, 'MISSING_JURISDICTION', 'State Admin has no assigned state.');
+    }
+
+    const accessToken = signToken(user);
+
+    await this.audit.logAuditEvent({
+      eventType: 'LOGIN_SUCCESS',
+      actorType: 'STATE_ADMIN',
+      actorReference: user.id,
+      metadata: { role: 'STATE_ADMIN', username: user.username, state: user.state },
+    });
+
+    return {
+      success: true,
+      message: 'State Admin login successful',
+      token: accessToken,
+      accessToken,
+      user: user.toPublicJSON(),
+      expiresIn: 3600,
+    };
+  }
+
+  async loginSuperAdmin({ username, identifier, password }) {
+    const loginUser = username || identifier;
+    if (!loginUser || !password) {
+      throw createAppError(400, 'MISSING_CREDENTIALS', 'Username and password are required.');
+    }
+
+    const user = await this.users.findByUsername(loginUser);
+
+    if (!user || user.status !== 'ACTIVE' || !user.password_hash) {
+      await this.audit.logAuditEvent({
+        eventType: 'LOGIN_FAILED',
+        actorType: 'SUPER_ADMIN',
+        actorReference: String(loginUser),
+        metadata: { reason: 'User not found or inactive' },
+      });
+      throw createAppError(401, 'INVALID_CREDENTIALS', 'Invalid username or password.');
+    }
+
+    const isValidPassword = await verifyPassword(password, user.password_hash);
+    if (!isValidPassword) {
+      await this.audit.logAuditEvent({
+        eventType: 'LOGIN_FAILED',
+        actorType: 'SUPER_ADMIN',
+        actorReference: user.id,
+        metadata: { reason: 'Invalid password' },
+      });
+      throw createAppError(401, 'INVALID_CREDENTIALS', 'Invalid username or password.');
+    }
+
+    const roles = Array.isArray(user.roles) ? user.roles : [user.roles];
+    const isSuperAdmin = roles.some((r) => String(r).toUpperCase() === 'SUPER_ADMIN');
+
+    if (!isSuperAdmin) {
+      await this.audit.logAuditEvent({
+        eventType: 'LOGIN_FAILED',
+        actorType: 'SUPER_ADMIN',
+        actorReference: user.id,
+        metadata: { reason: 'User lacks SUPER_ADMIN role' },
+      });
+      throw createAppError(403, 'FORBIDDEN', 'User is not authorized for Super Admin role.');
+    }
+
+    const accessToken = signToken(user);
+
+    await this.audit.logAuditEvent({
+      eventType: 'SUPER_ADMIN_LOGIN',
+      actorType: 'SUPER_ADMIN',
+      actorReference: user.id,
+      metadata: { role: 'SUPER_ADMIN', username: user.username },
+    });
+
+    return {
+      success: true,
+      message: 'Super Admin login successful',
+      token: accessToken,
+      accessToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username || user.external_reference,
+        role: 'SUPER_ADMIN',
+        roles: user.roles,
+      },
       expiresIn: 3600,
     };
   }

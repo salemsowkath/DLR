@@ -1,0 +1,13 @@
+ALTER TABLE land_records ADD COLUMN source_document_id VARCHAR(255);
+ALTER TABLE land_records ADD COLUMN ocr_language VARCHAR(32);
+ALTER TABLE land_records ADD COLUMN ocr_confidence DECIMAL(5,4);
+ALTER TABLE land_records ADD COLUMN validation_status VARCHAR(50);
+ALTER TABLE land_records ADD COLUMN validation_result JSON;
+ALTER TABLE review_cases ADD COLUMN ai_confidence DECIMAL(5,4);
+ALTER TABLE review_cases ADD COLUMN validation_result JSON;
+ALTER TABLE review_cases ADD COLUMN assigned_officer_id CHAR(36);
+ALTER TABLE review_cases ADD COLUMN reviewed_by CHAR(36);
+ALTER TABLE review_cases ADD COLUMN reviewed_at DATETIME(6);
+ALTER TABLE review_cases ADD COLUMN officer_notes TEXT;
+ALTER TABLE review_cases ADD COLUMN rejection_reason TEXT;
+ALTER TABLE documents ADD UNIQUE KEY uq_documents_user_checksum (created_by_user_id, checksum);

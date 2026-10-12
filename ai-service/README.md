@@ -199,7 +199,7 @@ Invalid transitions return a clear API error.
 
 ## Phase 3C-1: GeoJSON and Shapely Spatial Validation Engine
 
-Phase 3C-1 uses GeoJSON and Shapely for spatial validation. Optional PostgreSQL/PostGIS persistence is described in Phase 3D.
+Phase 3C-1 uses GeoJSON and Shapely for spatial validation. Persistent review and GIS results use local MySQL 8.4.
 
 ### Spatial capabilities
 
@@ -306,26 +306,18 @@ pytest -q
 
 Integration tests that require a real Tesseract installation should be marked separately and are not required for normal unit coverage.
 
-## Phase 3D: Optional PostgreSQL + PostGIS Persistence
+## MySQL 8.4 Persistence
 
-The AI service now has a PostgreSQL connection helper and repository implementations for land records/fields, document extractions, validation results, GIS parcels/results, review aggregates/anomalies, and audit events. Review persistence is selected through the existing repository abstraction. `PERSISTENCE_BACKEND=memory` remains the default; select `postgres` explicitly to use PostgreSQL. Configure `DATABASE_URL` or `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`. No password is hard-coded, and connection setup is lazy.
+The AI service uses the existing MySQL repositories for land records/fields, document extractions, validation results, GIS parcels/results, review aggregates/anomalies, and audit events. Configure `PERSISTENCE_BACKEND=mysql` with `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`. The service loads the workspace environment independently of its current working directory.
 
-Install dependencies from `requirements.txt` to include `psycopg`. Apply `database/schema.sql` and `database/seed.sql` from the workspace root; schema and verification details are in `database/README.md`. PostgreSQL 16+ and PostGIS 3.x are required for the persistent spatial repository. The application does not install or start either service.
+Apply `database/mysql_schema.sql` and the role-only `database/mysql_seed.sql` from the workspace root. MySQL is not installed, started, or managed by the application.
 
-GIS parcel persistence requires an explicit positive SRID and never calls `ST_Transform`. Geometry is stored with flexible SRID support and checked against its explicit SRID column. SQL does not calculate area; geographic-coordinate calculations remain unavailable under the existing `AREA_REQUIRES_PROJECTED_CRS` behavior.
+GIS parcel persistence requires an explicit positive SRID and uses MySQL spatial functions. Coordinate transformation and projected-CRS area calculations remain application responsibilities.
 
-Database contract tests use injected fake connections and do not require PostgreSQL. A live smoke test is marked `postgres_integration` and skips by default. To run it after installing/configuring PostgreSQL 16+ with PostGIS 3.x and installing the requirements:
-
-```powershell
-$env:DLR_RUN_POSTGRES_INTEGRATION = '1'
-$env:DATABASE_URL = 'postgresql://USER:CHANGE_ME@localhost:5432/dlr_database'
-.\.venv\Scripts\python.exe -m pytest -m postgres_integration -q
-```
-
-PostgreSQL 16/PostGIS 3 connectivity and the review persistence path have been verified in the development environment. The live integration test remains opt-in.
+Database contract tests use injected fake connections. Live MySQL integration tests are opt-in and require the local MySQL84 service.
 
 ## Phase 4: Backend Integration
 
 The Node backend calls the existing `POST /api/v1/documents/process` endpoint for one OCR pass plus extraction, followed by `POST /api/v1/validation/land-record`. When the request includes geometry, Node calls `POST /api/v1/gis/land-record`; when validation or GIS requests review, it calls `POST /api/v1/review/cases` with the backend's persisted document ID. No OCR, extraction, validation, or GIS algorithm is duplicated in Node.
 
-The document-processing response exposes OCR engine confidence as `ocr.confidence` (0-100); `ocr.average_confidence` is retained for compatibility and remains the existing extraction-field average. Review case persistence in PostgreSQL requires the backend's `documents` row to exist in the same database before case creation.
+The document-processing response exposes OCR engine confidence as `ocr.confidence` (0-100); `ocr.average_confidence` is retained for compatibility and remains the existing extraction-field average. Review case persistence in MySQL requires the backend's `documents` row to exist in the same database before case creation.

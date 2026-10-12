@@ -82,7 +82,7 @@ class AIServiceClient {
 
   async _request(path, { method = 'GET', body, stage }) {
     const config = this.configProvider();
-    const baseUrl = process.env.AI_SERVICE_URL || config.aiServiceUrl;
+    const baseUrl = process.env.AI_SERVICE_URL || config.aiServiceUrl || 'http://127.0.0.1:8000';
     if (!baseUrl) {
       throw new AIServiceError(503, 'AI_SERVICE_NOT_CONFIGURED', 'AI service URL is not configured.');
     }

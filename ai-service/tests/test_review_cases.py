@@ -1,8 +1,13 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api.routes.review import review_api_disabled
+from app.services.review.repository import InMemoryReviewCaseRepository
+from app.services.review.service import review_case_service
 
 client = TestClient(app)
+app.dependency_overrides[review_api_disabled] = lambda: None
+review_case_service.repository = InMemoryReviewCaseRepository()
 
 
 def _valid_record() -> dict:

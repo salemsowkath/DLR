@@ -1,6 +1,6 @@
-const config = require('../config/env');
 const { verifyToken } = require('../services/jwtService');
 const { userRepository } = require('../repositories/userRepository');
+const { sessionService } = require('../services/sessionService');
 
 function createAppError(statusCode, code, message) {
   const error = new Error(message);
@@ -19,19 +19,12 @@ async function requireAuth(req, res, next) {
     }
 
     if (!token) {
-      const isAuthEnforced = process.env.REQUIRE_AUTH === 'true' || (config.nodeEnv === 'production' && process.env.REQUIRE_AUTH !== 'false');
-      if (!isAuthEnforced) {
-        req.user = {
-          id: 'usr-anonymous-test',
-          name: 'Anonymous Test User',
-          external_reference: 'ANONYMOUS',
-          status: 'ACTIVE',
-          roles: ['CITIZEN'],
-          primary_role: 'CITIZEN',
-        };
-        return next();
-      }
       throw createAppError(401, 'MISSING_TOKEN', 'Authentication token is required.');
+    }
+
+    const clientContextId = req.headers['x-client-context-id'] || req.headers['x-session-context'];
+    if (clientContextId && !sessionService.isSessionActive(clientContextId, token)) {
+      throw createAppError(401, 'SESSION_REPLACED', 'Your DLR session was replaced by a new login.');
     }
 
     const decoded = verifyToken(token);

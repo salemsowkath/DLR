@@ -32,7 +32,7 @@ POST /api/documents/upload
 
 ### Upload limits
 
-- Maximum file size: 5 MB
+- Maximum file size: 10 MB
 - Multipart form field name: `file`
 
 ### Request format
@@ -95,11 +95,11 @@ Common error codes:
 
 Copy `.env.example` to `.env` and update the variables for your local environment.
 
-## Phase 3D: Optional PostgreSQL Persistence
+## MySQL 8.4 Persistence
 
-The backend uses the existing `pg` dependency through one lazy connection pool. Document metadata defaults to the existing in-memory repository. To opt into PostgreSQL, set `PERSISTENCE_BACKEND=postgres` and provide `DATABASE_URL`, or set all of `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`. Missing configuration leaves persistence disabled; credentials are not hard-coded. Uploaded document bytes continue to be stored as local files, with only metadata and a storage reference stored in PostgreSQL.
+The backend uses `mysql2` through one lazy connection pool. Normal operation uses `PERSISTENCE_BACKEND=mysql` with `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`. Uploaded document bytes continue to be stored as local files, with metadata and a storage reference stored in MySQL.
 
-Apply the shared schema and synthetic seed from the workspace root using the commands in `database/README.md`. Node repository tests use an injected pool; the live PostgreSQL/PostGIS integration was also verified in this environment.
+Apply the MySQL schema and role-only seed from the workspace root using the commands in `database/README.md`. Node repository tests use an injected pool; the live MySQL integration test is opt-in.
 
 ## Phase 4: Backend ↔ AI Service Integration
 
@@ -114,7 +114,7 @@ The orchestration calls the actual AI routes in order:
 
 The unified response includes document status, OCR confidence, extracted fields, validation issues/score, optional GIS area/overlap results, and review status. Node does not duplicate AI logic. AI errors and timeouts use explicit `AI_*` error codes; persisted document status transitions through `UPLOADED`, `PROCESSING`, `PROCESSED`, or `FAILED`.
 
-Set `AI_SERVICE_URL` and `AI_SERVICE_TIMEOUT_MS` in the backend `.env`; `.env.example` points to `http://127.0.0.1:8000`. With PostgreSQL enabled, the backend and AI service must use the same database so review-case document foreign keys resolve.
+Set `AI_SERVICE_URL` and `AI_SERVICE_TIMEOUT_MS` in the backend `.env`; `.env.example` points to `http://127.0.0.1:8000`. The backend and AI service use the same MySQL database so review-case document foreign keys resolve.
 
 Automated integration tests use a local HTTP mock. The optional live test requires `DLR_RUN_AI_INTEGRATION=1` and a running FastAPI service:
 
@@ -124,4 +124,4 @@ $env:DLR_RUN_AI_INTEGRATION = '1'
 npm test -- --test-name-pattern="live backend upload"
 ```
 
-It uploads generated synthetic image data and cleans its unique rows when PostgreSQL mode is selected.
+It uploads generated synthetic image data and cleans its unique rows when MySQL mode is selected.

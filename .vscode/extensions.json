@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "mtxr.sqltools",
+    "mtxr.sqltools-driver-mysql"
+  ],
+  "unwantedRecommendations": [
+    "alexcvzz.vscode-sqlite",
+    "qwtel.sqlite-viewer",
+    "ms-mssql.mssql"
+  ]
+}

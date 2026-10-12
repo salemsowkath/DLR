@@ -8,10 +8,12 @@ function createAppError(statusCode, code, message) {
 }
 
 const ROLE_ALIASES = {
+  SUPER_ADMIN: ['SUPER_ADMIN'],
+  STATE_ADMIN: ['STATE_ADMIN'],
   OFFICER: ['OFFICER', 'GOVERNMENT_OFFICER'],
   GOVERNMENT_OFFICER: ['OFFICER', 'GOVERNMENT_OFFICER'],
   MINISTER: ['MINISTER', 'ADMIN'],
-  ADMIN: ['MINISTER', 'ADMIN'],
+  ADMIN: ['MINISTER', 'ADMIN', 'SUPER_ADMIN'],
   CITIZEN: ['CITIZEN'],
 };
 
@@ -60,6 +62,17 @@ function requireRole(...allowedRoles) {
   };
 }
 
+function requireSuperAdmin(req, res, next) {
+  return requireRole('SUPER_ADMIN')(req, res, next);
+}
+
+function requireStateAdmin(req, res, next) {
+  return requireRole('STATE_ADMIN', 'SUPER_ADMIN')(req, res, next);
+}
+
 module.exports = {
   requireRole,
+  requireSuperAdmin,
+  requireStateAdmin,
+  ROLE_ALIASES,
 };

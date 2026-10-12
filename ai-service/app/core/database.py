@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
-
+from contextlib import contextmanager
+from typing import Any, Iterator
 from app.core.config import Settings, settings
 
 
@@ -10,28 +10,50 @@ class DatabaseConfigurationError(RuntimeError):
 
 
 def connect_database(config: Settings = settings, connector: Any = None) -> Any:
-    if config.persistence_backend.strip().lower() != 'postgres':
-        raise DatabaseConfigurationError('PostgreSQL persistence is not enabled; set PERSISTENCE_BACKEND=postgres explicitly.')
+    backend = config.persistence_backend.strip().lower()
+    if backend != 'mysql':
+        raise DatabaseConfigurationError('PERSISTENCE_BACKEND must be mysql.')
 
     connection_parameters: dict[str, Any]
-    if config.database_url:
-        connection_parameters = {'conninfo': config.database_url}
-    else:
-        if not config.postgres_host or not config.postgres_db or not config.postgres_user:
-            raise DatabaseConfigurationError('Configure DATABASE_URL or PostgreSQL host, database, and user settings.')
-        connection_parameters = {
-            'host': config.postgres_host,
-            'port': config.postgres_port,
-            'dbname': config.postgres_db,
-            'user': config.postgres_user,
-        }
-        if config.postgres_password:
-            connection_parameters['password'] = config.postgres_password
+    if not config.db_host or not config.db_name or not config.db_user or not config.db_password:
+        raise DatabaseConfigurationError('Configure DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD settings.')
+    connection_parameters = {
+        'host': config.db_host,
+        'port': config.db_port,
+        'database': config.db_name,
+        'user': config.db_user,
+        'password': config.db_password,
+    }
 
     if connector is None:
         try:
-            import psycopg
+            import mysql.connector
         except ImportError as exc:
-            raise DatabaseConfigurationError('PostgreSQL persistence requires the psycopg driver; install ai-service requirements.') from exc
-        connector = psycopg.connect
-    return connector(**connection_parameters)
+            raise DatabaseConfigurationError('MySQL persistence requires mysql-connector-python; install ai-service requirements.') from exc
+        connector = mysql.connector.connect
+    return MySQLConnection(connector(**connection_parameters))
+
+
+class MySQLConnection:
+    def __init__(self, connection: Any) -> None:
+        self.connection = connection
+
+    def __enter__(self) -> 'MySQLConnection':
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self.connection.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        self.connection.start_transaction()
+        try:
+            yield
+        except Exception:
+            self.connection.rollback()
+            raise
+        else:
+            self.connection.commit()
+
+    def cursor(self) -> Any:
+        return self.connection.cursor(dictionary=True)

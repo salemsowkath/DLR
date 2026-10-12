@@ -12,27 +12,133 @@ class LandRecordExtractor:
     FIELD_LABELS = {
         'owner_name': [
             'owner', 'owner name', 'owner_name', 'proprietor', 'land owner', 'உரிமையாளர்', 'உரிமையாளர் பெயர்',
-            'मालिक', 'मालिक का नाम', 'मालिक का',
+            'சொந்தக்காரர்', 'கிரயதாரர்', 'மாசூல்', 'मालिक', 'मालिक का नाम', 'मालिक का',
+        ],
+        'additional_owners': [
+            'co-owner', 'co owners', 'joint owner', 'கூட்டு உரிமையாளர்', 'இணை உரிமையாளர்', 'सह-मालिक',
+        ],
+        'relationship': [
+            'relationship', 'son of', 'daughter of', 'wife of', 's/o', 'd/o', 'w/o', 'தந்தை பெயர்', 'கணவர் பெயர்',
         ],
         'survey_number': [
-            'survey', 'survey no', 'survey number', 'survey no.', 'சர்வே', 'சர்வே எண்', 'सर्वे', 'सर्वे नंबर', 'सर्वे क्रमांक',
+            'survey', 'survey no', 'survey number', 'survey no.', 'சர்வே', 'சர்வே எண்', 'புல எண்', 'सर्वे', 'सर्वे नंबर', 'सर्वे क्रमांक',
         ],
-        'area': ['area', 'area in', 'பரப்பு', 'क्षेत्रफल', 'क्षेत्र'],
-        'village': ['village', 'village name', 'கிராமம்', 'गाँव', 'गांव'],
-        'taluk': ['taluk', 'tehsil', 'தாலுகா', 'तहसील'],
-        'district': ['district', 'மாவட்டம்', 'जिला'],
-        'date': ['date', 'date of registration', 'தேதி', 'दिनांक', 'तारीख'],
+        'subdivision_number': [
+            'sub division', 'subdivision', 'sub division no', 'உட்பிரிவு', 'உட்பிரிவு எண்', 'துணைப் பிரிவு',
+        ],
+        'patta_number': [
+            'patta', 'patta no', 'patta number', 'பட்டா', 'பட்டா எண்', 'पट्टा नंबर',
+        ],
+        'khasra_number': [
+            'khasra', 'khasra no', 'கச்ரா', 'கச்ரா எண்', 'खसरा', 'खसरा नंबर',
+        ],
+        'khata_number': [
+            'khata', 'khata no', 'கடா', 'கடா எண்', 'खाता', 'खाता संख्या',
+        ],
+        'state': [
+            'state', 'மாநிலம்', 'தமிழ்நாடு', 'tamil nadu', 'राज्य',
+        ],
+        'district': [
+            'district', 'மாவட்டம்', 'மாவட்ட', 'जिला',
+        ],
+        'taluk': [
+            'taluk', 'tehsil', 'தாலுகா', 'வட்டம்', 'तहसील',
+        ],
+        'village': [
+            'village', 'village name', 'கிராமம்', 'கிராம', 'गाँव', 'गांव',
+        ],
+        'area': [
+            'area', 'area in', 'extent', 'பரப்பு', 'விஸ்தீரணம்', 'நிலப்பரப்பு', 'क्षेत्रफल', 'क्षेत्र',
+        ],
+        'area_unit': [
+            'unit', 'area unit', 'அளவீடு', 'அலகு', 'ஏக்கர்', 'சென்ட்', 'sq ft', 'acre', 'cent', 'hectare',
+        ],
+        'classification': [
+            'classification', 'land classification', 'land type', 'வகைப்பாடு', 'நில வகைப்பாடு', 'நில வகை', 'நன்செய்', 'புன்செய்', 'தரிசு', 'மனை',
+        ],
+        'boundary_north': [
+            'north', 'boundary north', 'north boundary', 'வடக்கு', 'வடக்கில்', 'வடபுறம்', 'उत्तर',
+        ],
+        'boundary_south': [
+            'south', 'boundary south', 'south boundary', 'தெற்கு', 'தெற்கில்', 'தென்புறம்', 'दक्षिण',
+        ],
+        'boundary_east': [
+            'east', 'boundary east', 'east boundary', 'கிழக்கு', 'கிழக்கில்', 'கிழபுறம்', 'पूर्व',
+        ],
+        'boundary_west': [
+            'west', 'boundary west', 'west boundary', 'மேற்கு', 'மேற்கில்', 'மேற்குபுறம்', 'पश्चिम',
+        ],
+        'document_type': [
+            'document type', 'deed type', 'nature of document', 'ஆவண வகை', 'பத்திர வகை', 'கிரய பத்திரம்', 'செட்டில்மென்ட்', 'தான பத்திரம்',
+        ],
+        'document_date': [
+            'document date', 'deed date', 'ஆவண தேதி', 'பத்திர தேதி',
+        ],
+        'registration_number': [
+            'registration number', 'registration no', 'reg no', 'doc no', 'பதிவு எண்', 'ஆவண எண்', 'पंजीकरण संख्या',
+        ],
+        'registration_date': [
+            'registration date', 'reg date', 'பதிவு தேதி', 'பதிவு நாள்',
+        ],
+        'stamp_value': [
+            'stamp duty', 'stamp value', 'முத்திரைத்தாள் மதிப்பு', 'முத்திரை கட்டணம்',
+        ],
+        'consideration_value': [
+            'consideration value', 'consideration amount', 'consideration', 'கிரயத் தொகை', 'தொகை ரூபாய்', 'விற்பனை தொகை',
+        ],
+        'land_value': [
+            'land value', 'guideline value', 'நில மதிப்பு', 'வழிகாட்டி மதிப்பு',
+        ],
+        'other_value': [
+            'other value', 'structure value', 'இதர மதிப்பு', 'கட்டட மதிப்பு',
+        ],
+        'total_value': [
+            'total value', 'market value', 'total amount', 'மொத்த மதிப்பு', 'மதிப்பு ரூபாய்',
+        ],
+        'mutation': [
+            'mutation', 'mutation no', 'மாறுதல்', 'பட்டா மாறுதல்',
+        ],
+        'transaction_type': [
+            'transaction type', 'nature of transaction', 'பரிவர்த்தனை வகை', 'கிரயம்', 'தானம்', 'பரிமாற்றம்',
+        ],
+        'date': [
+            'date', 'date of registration', 'தேதி', 'திங்கள்', 'दिनांक', 'तारीख',
+        ],
     }
 
     def extract(self, text: str, language: str = 'eng') -> dict[str, FieldExtractionResult]:
         normalized = self._normalize_text(text)
         return {
             'owner_name': self._extract_field(normalized, 'owner_name', self._owner_validator),
+            'additional_owners': self._extract_field(normalized, 'additional_owners', self._text_validator),
+            'relationship': self._extract_field(normalized, 'relationship', self._text_validator),
             'survey_number': self._extract_field(normalized, 'survey_number', self._survey_validator),
-            'area': self._extract_field(normalized, 'area', self._area_validator),
-            'village': self._extract_field(normalized, 'village', self._text_validator),
-            'taluk': self._extract_field(normalized, 'taluk', self._text_validator),
+            'subdivision_number': self._extract_field(normalized, 'subdivision_number', self._text_validator),
+            'patta_number': self._extract_field(normalized, 'patta_number', self._text_validator),
+            'khasra_number': self._extract_field(normalized, 'khasra_number', self._text_validator),
+            'khata_number': self._extract_field(normalized, 'khata_number', self._text_validator),
+            'state': self._extract_field(normalized, 'state', self._text_validator),
             'district': self._extract_field(normalized, 'district', self._text_validator),
+            'taluk': self._extract_field(normalized, 'taluk', self._text_validator),
+            'village': self._extract_field(normalized, 'village', self._text_validator),
+            'area': self._extract_field(normalized, 'area', self._area_validator),
+            'area_unit': self._extract_field(normalized, 'area_unit', self._text_validator),
+            'classification': self._extract_field(normalized, 'classification', self._text_validator),
+            'boundary_north': self._extract_field(normalized, 'boundary_north', self._text_validator),
+            'boundary_south': self._extract_field(normalized, 'boundary_south', self._text_validator),
+            'boundary_east': self._extract_field(normalized, 'boundary_east', self._text_validator),
+            'boundary_west': self._extract_field(normalized, 'boundary_west', self._text_validator),
+            'document_type': self._extract_field(normalized, 'document_type', self._text_validator),
+            'document_date': self._extract_field(normalized, 'document_date', self._date_validator),
+            'registration_number': self._extract_field(normalized, 'registration_number', self._text_validator),
+            'registration_date': self._extract_field(normalized, 'registration_date', self._date_validator),
+            'stamp_value': self._extract_field(normalized, 'stamp_value', self._text_validator),
+            'consideration_value': self._extract_field(normalized, 'consideration_value', self._text_validator),
+            'land_value': self._extract_field(normalized, 'land_value', self._text_validator),
+            'other_value': self._extract_field(normalized, 'other_value', self._text_validator),
+            'total_value': self._extract_field(normalized, 'total_value', self._text_validator),
+            'mutation': self._extract_field(normalized, 'mutation', self._text_validator),
+            'transaction_type': self._extract_field(normalized, 'transaction_type', self._text_validator),
             'date': self._extract_field(normalized, 'date', self._date_validator),
         }
 
